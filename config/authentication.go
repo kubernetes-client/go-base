@@ -43,7 +43,7 @@ func (l *KubeConfigLoader) loadAuthentication() {
 	// to log meaningful failure message. Kubeconfig is allowed to have no user
 	// in current context, therefore it is allowed that no authentication is loaded.
 
-	if l.loadGCPToken() || l.loadUserToken() || l.loadUserPassToken() {
+	if l.loadAuthProviderToken() || l.loadUserToken() || l.loadUserPassToken() {
 		return
 	}
 }

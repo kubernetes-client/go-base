@@ -23,6 +23,7 @@ import (
 	"github.com/golang/glog"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"k8s.io/client/kubernetes/config/api"
 )
 
 const (
@@ -34,45 +35,44 @@ type GoogleCredentialLoader interface {
 	GetGoogleCredentials() (*oauth2.Token, error)
 }
 
-func (l *KubeConfigLoader) loadGCPToken() bool {
-	if l.user.AuthProvider == nil || l.user.AuthProvider.Name != "gcp" {
-		return false
+func loadGCPToken(authInfo *api.AuthInfo, ld *KubeConfigLoader) (string, bool) {
+	if authInfo.AuthProvider == nil || authInfo.AuthProvider.Name != "gcp" {
+		return "", false
 	}
 
 	// Refresh GCP token if necessary
-	if l.user.AuthProvider.Config == nil {
-		if err := l.refreshGCPToken(); err != nil {
+	if authInfo.AuthProvider.Config == nil {
+		if err := refreshGCPToken(authInfo, ld); err != nil {
 			glog.Errorf("failed to refresh GCP token: %v", err)
-			return false
+			return "", false
 		}
 	}
-	if _, ok := l.user.AuthProvider.Config["expiry"]; !ok {
-		if err := l.refreshGCPToken(); err != nil {
+	if _, ok := authInfo.AuthProvider.Config["expiry"]; !ok {
+		if err := refreshGCPToken(authInfo, ld); err != nil {
 			glog.Errorf("failed to refresh GCP token: %v", err)
-			return false
+			return "", false
 		}
 	}
-	expired, err := isExpired(l.user.AuthProvider.Config["expiry"])
+	expired, err := isExpired(authInfo.AuthProvider.Config["expiry"])
 	if err != nil {
 		glog.Errorf("failed to determine if GCP token is expired: %v", err)
-		return false
+		return "", false
 	}
 
 	if expired {
-		if err := l.refreshGCPToken(); err != nil {
+		if err := refreshGCPToken(authInfo, ld); err != nil {
 			glog.Errorf("failed to refresh GCP token: %v", err)
-			return false
+			return "", false
 		}
 	}
 
 	// Use GCP access token
-	l.restConfig.token = "Bearer " + l.user.AuthProvider.Config["access-token"]
-	return true
+	return "Bearer " + authInfo.AuthProvider.Config["access-token"], true
 }
 
-func (l *KubeConfigLoader) refreshGCPToken() error {
-	if l.user.AuthProvider.Config == nil {
-		l.user.AuthProvider.Config = map[string]string{}
+func refreshGCPToken(authInfo *api.AuthInfo, l *KubeConfigLoader) error {
+	if authInfo.AuthProvider.Config == nil {
+		authInfo.AuthProvider.Config = map[string]string{}
 	}
 
 	// Get *oauth2.Token through Google APIs
@@ -85,12 +85,12 @@ func (l *KubeConfigLoader) refreshGCPToken() error {
 	}
 
 	// Store credentials to Config
-	l.user.AuthProvider.Config["access-token"] = credentials.AccessToken
-	l.user.AuthProvider.Config["expiry"] = credentials.Expiry.Format(gcpRFC3339Format)
+	authInfo.AuthProvider.Config["access-token"] = credentials.AccessToken
+	authInfo.AuthProvider.Config["expiry"] = credentials.Expiry.Format(gcpRFC3339Format)
 
 	setUserWithName(l.rawConfig.AuthInfos, l.currentContext.AuthInfo, &l.user)
 	// Persist kube config file
-	if !l.skipConfigPersist {
+	if l.skipConfigPersist {
 		if err := l.persistConfig(); err != nil {
 			return err
 		}
